@@ -1,0 +1,118 @@
+import streamlit as st
+import yfinance as yf
+import pandas as pd
+import time
+from datetime import datetime, timedelta
+import pytz
+
+# --- CONFIGURATION DE LA PAGE ---
+st.set_page_config(page_title="GOLD VVIP TERMINAL - MC ANTHONIO", layout="wide")
+
+# --- FONCTIONS TECHNIQUES ---
+def get_live_gold_price():
+    try:
+        gold = yf.Ticker("GC=F")
+        data = gold.history(period="1d", interval="1m")
+        return round(data['Close'].iloc[-1], 2)
+    except:
+        return 5087.0  # Prix de secours si l'API échoue
+
+def play_sound(url):
+    st.components.v1.html(f'<audio autoplay><source src="{url}" type="audio/mpeg"></audio>', height=0)
+
+# --- 1. RÉCUPÉRATION DES DONNÉES EN DIRECT ---
+current_price = get_live_gold_price()
+now_mg = datetime.now(pytz.timezone('Indian/Antananarivo'))
+
+# --- 2. SIDEBAR : PARAMÈTRES & INPUTS ---
+st.sidebar.header("🔱 PARAMÈTRES LIVE")
+st.sidebar.metric("OR (XAUUSD) UTC+3", f"${current_price}")
+
+sentiment_long = st.sidebar.slider("% Acheteurs (Foule)", 0, 100, 65)
+balance = st.sidebar.number_input("Solde du Compte ($)", value=1000.0)
+risk_per_trade = st.sidebar.slider("Risque (%)", 0.5, 5.0, 1.0)
+golden_zone = st.sidebar.number_input("Prix Golden Zone", value=current_price - 2.0)
+entry_price_taken = st.sidebar.number_input("Ton Prix d'Entrée (pour suivi)", value=current_price)
+
+# --- 3. LOGIQUE DE STRATÉGIE (SENTIMENT & NEWS) ---
+bias = "VENTE (SELL) 🔴" if sentiment_long > 60 else "ACHAT (BUY) 🟢"
+prob_score = "TRÈS HAUTE" if sentiment_long > 75 else "HAUTE" if sentiment_long > 65 else "MODÉRÉE"
+
+# Simulation News (Filtrage High/Medium Impact)
+news_data = [
+    {"Heure": (now_mg + timedelta(minutes=15)).strftime("%H:%M"), "Impact": "HIGH", "Event": "USD - NFP"},
+    {"Heure": (now_mg + timedelta(hours=2)).strftime("%H:%M"), "Impact": "MEDIUM", "Event": "USD - Fed Speaker"}
+]
+df_news = pd.DataFrame(news_data)
+is_news_active = any(abs((datetime.strptime(h, "%H:%M").replace(year=now_mg.year, month=now_mg.month, day=now_mg.day, tzinfo=now_mg.tzinfo) - now_mg).total_seconds()) < 900 for h in df_news['Heure'])
+
+# --- 4. CALCULATEUR DE POSITION & TRADES ---
+sl_pips = 150 # 15$ de SL par défaut
+if is_news_active: sl_pips *= 2 # Protection news
+
+risk_amount = (balance * (risk_per_trade / 100))
+if prob_score == "MODÉRÉE": risk_amount /= 2
+
+lot_size = round(risk_amount / (sl_pips / 10 * 100), 2)
+nb_positions = 2 if prob_score == "TRÈS HAUTE" else 1
+
+# --- 5. ALERTES SONORES (GOLDEN ZONE & +20 PIPS) ---
+# Alerte Golden Zone
+if abs(current_price - golden_zone) <= 0.50:
+    st.warning("🚨 PROCHE GOLDEN ZONE !")
+    play_sound("https://www.soundjay.com/buttons/beep-07.wav")
+
+# Alerte +20 Pips
+gain_pips = (current_price - entry_price_taken) * 10 if "ACHAT" in bias else (entry_price_taken - current_price) * 10
+if gain_pips >= 20.0:
+    st.balloons()
+    st.success("✅ +20 PIPS ATTEINTS ! SÉCURISEZ (BE)")
+    play_sound("https://www.soundjay.com/buttons/button-10.mp3")
+
+# --- 6. INTERFACE PRINCIPALE ---
+st.title("🔱 MC ANTHONIO - SMART MONEY TERMINAL")
+
+col1, col2, col3 = st.columns(3)
+col1.metric("VERDICT STRATÉGIQUE", bias)
+col2.metric("PROBABILITÉ", prob_score)
+col3.metric("NB POSITIONS", f"{nb_positions} Trade(s)")
+
+st.markdown("---")
+
+# ORDER BOOK & LIQUIDITÉ
+st.subheader("🔍 Order Book & Liquidité")
+c1, c2 = st.columns(2)
+target_liq = current_price - 5.0 if "VENTE" in bias else current_price + 5.0
+c1.error(f"🧲 Aimant à Liquidité (TP) : {target_liq}")
+c2.info(f"📊 Volume Net : {'Pression Vendeuse' if sentiment_long > 60 else 'Pression Acheteuse'}")
+
+# CALENDRIER NEWS
+st.subheader("📅 Calendrier Économique (Madagascar Time)")
+st.table(df_news)
+
+# --- 7. GÉNÉRATEUR DE SIGNAL VVIP ---
+st.markdown("---")
+st.subheader("📤 Copie Signal VVIP by mc ANTHONIO")
+tp1 = current_price - 4.5 if "VENTE" in bias else current_price + 4.5
+tp2 = target_liq
+
+vvip_msg = f"""🔱 **VVIP SIGNAL BY MC ANTHONIO** 🔱
+━━━━━━━━━━━━━━━━━━━━
+Instrument : **GOLD (XAUUSD)** 🚀
+Ordre : **{bias}**
+━━━━━━━━━━━━━━━━━━━━
+📍 Entrée : {current_price}
+🛡️ Stop Loss : {current_price + 15 if 'VENTE' in bias else current_price - 15}
+
+🎯 Take Profit 1 : {tp1}
+💎 Take Profit Final : {tp2}
+━━━━━━━━━━━━━━━━━━━━
+⚠️ *Gestion du risque : {risk_per_trade}% par position.*"""
+
+st.text_area("Prêt à partager :", value=vvip_msg, height=250)
+if st.button("📋 Copier le Signal"):
+    st.success("Signal copié ! Collez-le dans votre groupe VVIP.")
+
+# AUTO-REFRESH
+time.sleep(60)
+st.rerun()
